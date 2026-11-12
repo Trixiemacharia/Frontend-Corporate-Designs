@@ -9,6 +9,7 @@ export default {
         ivory: '#F7F6F0',
         sage: '#DCE6DE',
         gold: '#B79B63',
+        mint: '#8EE0BC',
       },
       fontFamily: { sans: ['Manrope', 'system-ui', 'sans-serif'] },
       boxShadow: {
