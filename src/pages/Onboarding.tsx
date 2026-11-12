@@ -10,12 +10,18 @@ import { initialData, validate, type Data, type Errors } from '../lib/validation
 
 export default function Onboarding() {
   const { go } = useCurtain()
-  const [data, setData] = useState<Data>(initialData)
+  const [data, setData] = useState<Data>(() => {
+    try { const saved = localStorage.getItem('meridian-onboarding'); return saved ? { ...initialData, ...JSON.parse(saved), password: '', confirm: '' } : initialData } catch { return initialData }
+  })
   const [step, setStep] = useState(0)
   const [errors, setErrors] = useState<Errors>({})
   const [done, setDone] = useState(false)
   const [fromConfirm, setFromConfirm] = useState(false)
   const [signIn, setSignIn] = useState(false)
+  useEffect(() => {
+    const { password: _password, confirm: _confirm, ...safe } = data
+    localStorage.setItem('meridian-onboarding', JSON.stringify(safe))
+  }, [data])
   const focusRef = useRef<HTMLDivElement>(null)
   const firstRender = useRef(true)
 
@@ -55,15 +61,17 @@ export default function Onboarding() {
                 className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-forest text-mint"><Check size={38} strokeWidth={3} /></motion.div>
               <h1 className="mt-6 text-2xl font-extrabold text-forest">Your workspace is ready{first ? `, ${first}` : ''}.</h1>
               <p className="mx-auto mt-3 max-w-sm text-sm text-charcoal/65">Thank you for completing setup for {data.org || 'your organisation'}. This is a prototype, so no real account was created.</p>
-              <Button className="mt-7 w-full" onClick={() => go('/')}>Back to home</Button>
+              <Button className="mt-7 w-full" onClick={() => go('/workspace')}>Open your workspace</Button>
             </motion.div>
           ) : (
             <motion.form key={step} noValidate
               initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.3 }}
-              onSubmit={ev => { ev.preventDefault(); step === 4 ? setDone(true) : next() }}>
-              {screens[step]}
+              onSubmit={ev => { ev.preventDefault(); if (step === 4) { setDone(true); go('/workspace') } else next() }}>
+              <div className="min-h-[380px] max-h-[56vh] overflow-y-auto overscroll-contain pr-1 sm:min-h-[420px]">
+                {screens[step]}
+              </div>
               <Button type="submit" className="mt-7 w-full">
-                {step === 4 ? 'Create account' : fromConfirm ? 'Save and review' : 'Continue'} {step !== 4 && <ArrowRight size={16} />}
+                {step === 4 ? 'Create My Workspace' : fromConfirm ? 'Save and review' : 'Continue'} {step !== 4 && <ArrowRight size={16} />}
               </Button>
               <div className="mt-3 text-center">
                 {canGoBack

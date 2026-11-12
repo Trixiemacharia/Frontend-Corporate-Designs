@@ -78,7 +78,7 @@ export default function OnboardingShell({ current, done, onSignIn, children }: P
           </div>
 
           <div className="w-full max-w-[520px] justify-self-center lg:justify-self-end">
-            <div className="rounded-2xl bg-white p-6 text-charcoal shadow-lift sm:p-8">
+            <div className="rounded-2xl bg-white p-6 text-charcoal shadow-lift sm:min-h-[700px] sm:p-8">
               <Stepper current={current} done={done} />
               <div className="mt-7">{children}</div>
             </div>

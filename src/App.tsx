@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { CurtainProvider } from './components/CurtainProvider'
 import Landing from './pages/Landing'
 import Onboarding from './pages/Onboarding'
+import Workspace from './pages/Workspace'
 
 export default function App() {
   return (
@@ -11,6 +12,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/workspace/*" element={<Workspace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </CurtainProvider>

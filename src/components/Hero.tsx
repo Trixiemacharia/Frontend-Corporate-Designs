@@ -19,11 +19,11 @@ export default function Hero() {
             Intelligent Systems.<br />Better Business.
           </motion.h1>
           <motion.p variants={item} className="mt-6 max-w-xl text-lg leading-relaxed text-charcoal/75">
-            One platform to streamline operations, manage teams and sharpen decision-making, so your organisation runs with clarity at every level.
+            Your operations, connected. Your next decision, clearer. Meet the operations copilot that helps multi-site businesses understand performance, identify risks and take action with confidence.
           </motion.p>
           <motion.div variants={item} className="mt-9 flex flex-col gap-3 sm:flex-row">
             <Button onClick={() => go('/onboarding')}>Get Started <ArrowRight size={16} /></Button>
-            <Button variant="outline" href="#platform">Explore Platform</Button>
+            <Button variant="outline" href="#platform">Explore Meridian</Button>
           </motion.div>
         </motion.div>
 
