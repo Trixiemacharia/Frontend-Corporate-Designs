@@ -1,6 +1,6 @@
 import {
-  Activity, Briefcase, Building2, Gauge, Layers, LifeBuoy, MessagesSquare, Plus,
-  Settings, ShieldCheck, TrendingUp, Users, Wallet, Workflow, type LucideIcon,
+   Briefcase, Building2, Gauge, Layers, LifeBuoy, MessagesSquare, Plus,
+  Settings, TrendingUp, Users, Wallet, Workflow, type LucideIcon,
 } from 'lucide-react'
 
 export const navLinks = [
@@ -19,11 +19,13 @@ export const metrics = [
   { value: '99.99%', label: 'Platform availability' },
 ]
 
-export const capabilities: { icon: LucideIcon; title: string; text: string }[] = [
-  { icon: Building2, title: 'Enterprise Operations', text: 'Coordinate processes, assets and approvals across every site from one place.' },
-  { icon: Users, title: 'Workforce Management', text: 'Plan teams, track capacity and keep people aligned with clear ownership.' },
-  { icon: Activity, title: 'Business Intelligence', text: 'Turn operational data into dashboards leaders can act on with confidence.' },
-  { icon: ShieldCheck, title: 'Security and Compliance', text: 'Role-based access, audit trails and policy controls built in from day one.' },
+const photo = (id: string) => `https://images.unsplash.com/${id}?auto=format&fit=crop&w=800&q=80`
+
+export const capabilities: { image: string; alt: string; title: string; text: string }[] = [
+  { image: photo('photo-1454165804606-c3d57bc86b40'), alt: 'A team reviewing business operations on a desk with documents and a laptop', title: 'Enterprise Operations', text: 'Coordinate processes, assets and approvals across every site from one place.' },
+  { image: photo('photo-1522071820081-009f0129c71c'), alt: 'Colleagues collaborating around laptops', title: 'Workforce Management', text: 'Plan teams, track capacity and keep people aligned with clear ownership.' },
+  { image: photo('photo-1551288049-bebda4e38f71'), alt: 'Analytics dashboards on a screen', title: 'Business Intelligence', text: 'Turn operational data into dashboards leaders can act on with confidence.' },
+  { image: photo('photo-1563986768609-322da13575f3'), alt: 'A padlock graphic over a laptop representing cybersecurity', title: 'Security and Compliance', text: 'Role-based access, audit trails and policy controls built in from day one.' },
 ]
 
 export const advantages: { icon: LucideIcon; title: string; text: string }[] = [
