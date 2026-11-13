@@ -4,8 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node server.mjs & vite --host 127.0.0.1",
+    "serve": "node server.mjs",
     "build": "tsc -b && vite build",
+    "test:agent": "node scripts/agent-smoke.mjs",
     "lint": "oxlint",
     "preview": "vite preview"
   },

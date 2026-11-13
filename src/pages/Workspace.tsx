@@ -3,7 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Activity, ArrowDownRight, ArrowUpRight, Bell, Building2, Check, CheckCircle2, ChevronRight, CircleHelp, Command, FileText, LayoutDashboard, Menu, MessageSquareText, MoreHorizontal, Search, Send, Settings, Sparkles, Users, Wallet, X, Zap } from 'lucide-react'
 import Logo from '../components/Logo'
-import { draftNote, flagOverruns, getBudgets, money } from '../data/operations'
+import { flagOverruns, getBudgets, money } from '../data/operations'
+import { classifyRequest, composeWithModel, executeAgent, interpretWithModel, type AgentResult, type Plan } from '../lib/agent'
 
 type Profile = { name?: string; email?: string; org?: string; industry?: string; role?: string; prefs?: string[] }
 type Stage = 'idle' | 'thinking' | 'executing' | 'composing' | 'completed' | 'error'
@@ -13,7 +14,6 @@ const links = [
   { label: 'Teams', path: '/workspace/teams', icon: Users },
   { label: 'Budgets', path: '/workspace/budgets', icon: Wallet },
 ]
-const operations = ['Retrieving current quarter budget records', 'Comparing spend against allocations', 'Identifying sites over budget']
 const formatCompact = (amount: number) => `KES ${(amount / 1000).toFixed(1)}k`
 
 export default function Workspace() {
@@ -23,13 +23,16 @@ export default function Workspace() {
   const [copilot, setCopilot] = useState(false)
   const [query, setQuery] = useState('')
   const [stage, setStage] = useState<Stage>('idle')
-  const [opIndex, setOpIndex] = useState(-1)
   const [sent, setSent] = useState<string[]>([])
   const [dismissed, setDismissed] = useState<string[]>([])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [editId, setEditId] = useState<string | null>(null)
   const [details, setDetails] = useState(false)
-  const [error, setError] = useState(false)
+  const [plan, setPlan] = useState<Plan | null>(null)
+  const [agentResult, setAgentResult] = useState<AgentResult | null>(null)
+  const [toolIndex, setToolIndex] = useState(-1)
+  const [mode, setMode] = useState<'AI assisted' | 'Offline fallback'>('Offline fallback')
+  const [highlightedSite, setHighlightedSite] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const timers = useRef<number[]>([])
   const rows = useMemo(getBudgets, [])
@@ -48,19 +51,32 @@ export default function Workspace() {
   useEffect(() => { if (copilot) window.setTimeout(() => inputRef.current?.focus(), 250) }, [copilot])
   useEffect(() => () => timers.current.forEach(window.clearTimeout), [])
 
-  const run = () => {
+  const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms))
+  const run = async (value = query) => {
+    if (!value.trim()) return
     timers.current.forEach(window.clearTimeout)
-    if (error) { setError(false) }
-    setStage('thinking'); setOpIndex(-1); setSent([]); setDismissed([]); setDetails(false); setEditId(null)
-    timers.current = [
-      window.setTimeout(() => setStage('executing'), 850), window.setTimeout(() => setOpIndex(0), 1200),
-      window.setTimeout(() => setOpIndex(1), 1900), window.setTimeout(() => setOpIndex(2), 2600),
-      window.setTimeout(() => setStage('composing'), 3300),
-      window.setTimeout(() => { setDrafts(Object.fromEntries(overruns.map(site => [site.id, draftNote(site)]))); setStage('completed') }, 4100),
-    ]
+    setStage('executing'); setToolIndex(-1); setSent([]); setDismissed([]); setDetails(false); setEditId(null); setAgentResult(null)
+    const previous = agentResult ? query : ''
+    let chosen = classifyRequest(value, previous)
+    setPlan(chosen)
+    const modelPlan = await interpretWithModel(value, previous)
+    if (modelPlan) { chosen = modelPlan; setMode('AI assisted') } else setMode('Offline fallback')
+    setPlan(chosen)
+    await wait(250)
+    try {
+      const priorDrafts = agentResult?.drafts.map(d => ({ ...d, text: drafts[d.site.id] ?? d.text }))
+      const result = executeAgent(value, chosen, priorDrafts, agentResult?.sources)
+      for (let i = 0; i < result.tools.length; i++) { setToolIndex(i); await wait(600) }
+      setStage('composing')
+      const composition = modelPlan ? await composeWithModel(value, result) : null
+      const finished = { ...result, ...(composition || {}), mode: modelPlan ? 'AI assisted' as const : 'Offline fallback' as const }
+      setAgentResult(finished)
+      setDrafts(Object.fromEntries(finished.drafts.map(d => [d.site.id, d.text])))
+      setStage('completed')
+    } catch { setStage('error') }
   }
-  const ask = (value = query) => { if (!value.trim()) return; setQuery(value); run() }
-  const reset = () => { timers.current.forEach(window.clearTimeout); setStage('idle'); setOpIndex(-1); setQuery(''); setSent([]); setDismissed([]); setEditId(null); setDetails(false) }
+  const ask = (value = query) => { if (!value.trim()) return; setQuery(value); void run(value) }
+  const reset = () => { timers.current.forEach(window.clearTimeout); setStage('idle'); setQuery(''); setSent([]); setDismissed([]); setEditId(null); setDetails(false); setPlan(null); setAgentResult(null); setToolIndex(-1) }
 
   const Sidebar = ({ mobile = false }: { mobile?: boolean }) => <div className="flex h-full flex-col bg-white px-4 py-5">
     <div className="px-2"><Logo /></div>
@@ -78,7 +94,7 @@ export default function Workspace() {
   </div>
 
   const statusStyle = (status: string) => status === 'Over budget' ? 'bg-[#FCE9E4] text-[#A3402C]' : status === 'Attention required' ? 'bg-[#FFF4D9] text-[#896813]' : 'bg-[#E7F4EC] text-[#27704A]'
-  const Table = () => <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left"><thead><tr className="border-b border-sage text-[10px] font-bold uppercase tracking-[.12em] text-charcoal/45"><th className="pb-3 pl-1">Site</th><th className="pb-3">Site lead</th><th className="pb-3">Quarterly budget</th><th className="pb-3">Amount spent</th><th className="pb-3">Utilisation</th><th className="pb-3">Status</th></tr></thead><tbody>{rows.map(site => <tr key={site.id} className="border-b border-sage/70 last:border-0"><td className="py-4 pl-1 text-sm font-bold text-forest">{site.name}</td><td className="py-4 text-sm text-charcoal/65">{site.lead}</td><td className="py-4 text-sm">{money(site.budget)}</td><td className="py-4 text-sm">{money(site.spent)}</td><td className="py-4"><div className="flex items-center gap-2"><div className="h-1.5 w-20 overflow-hidden rounded-full bg-sage"><div className={`h-full rounded-full ${site.overrun ? 'bg-[#C8715C]' : 'bg-forest'}`} style={{ width: `${Math.min(site.utilisation, 100)}%` }} /></div><span className="text-xs font-semibold">{site.utilisation.toFixed(0)}%</span></div></td><td className="py-4"><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${statusStyle(site.status)}`}>{site.status}</span></td></tr>)}</tbody></table></div>
+  const Table = () => <div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left"><thead><tr className="border-b border-sage text-[10px] font-bold uppercase tracking-[.12em] text-charcoal/45"><th className="pb-3 pl-1">Site</th><th className="pb-3">Site lead</th><th className="pb-3">Quarterly budget</th><th className="pb-3">Amount spent</th><th className="pb-3">Utilisation</th><th className="pb-3">Status</th></tr></thead><tbody>{rows.map(site => <tr key={site.id} id={`site-${site.id}`} className={`border-b border-sage/70 last:border-0 transition-colors ${highlightedSite===site.id?'bg-[#FFF4D9]':''}`}><td className="py-4 pl-1 text-sm font-bold text-forest">{site.name}</td><td className="py-4 text-sm text-charcoal/65">{site.lead}</td><td className="py-4 text-sm">{money(site.budget)}</td><td className="py-4 text-sm">{money(site.spent)}</td><td className="py-4"><div className="flex items-center gap-2"><div className="h-1.5 w-20 overflow-hidden rounded-full bg-sage"><div className={`h-full rounded-full ${site.overrun ? 'bg-[#C8715C]' : 'bg-forest'}`} style={{ width: `${Math.min(site.utilisation, 100)}%` }} /></div><span className="text-xs font-semibold">{site.utilisation.toFixed(0)}%</span></div></td><td className="py-4"><span className={`rounded-full px-2.5 py-1 text-[10px] font-bold ${statusStyle(site.status)}`}>{site.status}</span></td></tr>)}</tbody></table></div>
 
   return <div className="min-h-screen bg-[#F6F7F3] text-charcoal">
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-[248px] border-r border-sage/70 lg:block"><Sidebar /></aside>
@@ -117,13 +133,14 @@ export default function Workspace() {
           {stage!=='idle' && <div className="space-y-5">
             <div className="flex justify-end"><div className="max-w-[88%] rounded-2xl rounded-tr-sm bg-forest px-4 py-3 text-sm leading-relaxed text-white">{query || 'Which sites are over budget this quarter, and draft a note to their leads.'}</div></div>
             <div className="flex items-start gap-2.5"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#EAF3EC] text-forest"><Sparkles size={15}/></span><div className="min-w-0 flex-1"><p className="text-xs font-bold text-forest">Meridian</p>
-              {(stage==='thinking'||stage==='executing'||stage==='composing') && <div className="mt-2 rounded-2xl rounded-tl-sm border border-sage bg-white p-4"><div className="flex items-center gap-2 text-sm font-semibold text-forest"><span className="h-2 w-2 animate-pulse rounded-full bg-gold"/>{stage==='thinking'?'Understanding your request…':stage==='composing'?'Drafting messages for site leads…':'Reviewing your site budgets'}</div><p className="mt-1 text-xs text-charcoal/55">{stage==='thinking'?'I’ll compare current quarter spend with each site allocation, then prepare drafts for your review.':'Following the requested workflow. No messages will be sent without your approval.'}</p>{stage!=='thinking'&&<div className="mt-4 space-y-2.5">{operations.map((operation,i)=>{const done=opIndex>i||stage==='composing';const running=opIndex===i&&stage==='executing';return <div key={operation} className="flex items-center justify-between gap-2 rounded-xl bg-[#F7F8F5] px-3 py-2.5"><div className="flex items-center gap-2.5"><span className={`grid h-6 w-6 place-items-center rounded-lg ${done?'bg-[#E7F4EC] text-[#27704A]':running?'bg-[#FFF4D9] text-[#896813]':'bg-white text-charcoal/35'}`}>{done?<Check size={13}/>:running?<span className="h-2 w-2 animate-pulse rounded-full bg-gold"/>:<span className="h-1.5 w-1.5 rounded-full bg-current"/>}</span><span className="text-[11px] font-medium text-charcoal/70">{operation}</span></div><span className="shrink-0 text-[9px] font-bold uppercase tracking-wide text-charcoal/40">{done?'Complete':running?'Running':'Pending'}</span></div>})}<div className="flex justify-between px-1 text-[10px] font-semibold text-forest"><span>{opIndex>=0||stage==='composing'?'5 site records retrieved.':'Preparing data access…'}</span><span>{stage==='composing'?`${overruns.length} sites flagged.`:' '}</span></div></div>}</div>}
-              {stage==='error'&&<div className="mt-2 rounded-2xl border border-[#F0D1C9] bg-white p-4"><p className="text-sm font-bold text-[#A3402C]">I couldn’t complete that review.</p><p className="mt-1 text-xs text-charcoal/55">The workspace data could not be loaded. Try again.</p><button onClick={run} className="mt-3 rounded-lg bg-forest px-3 py-2 text-xs font-bold text-white">Retry</button></div>}
-              {stage==='completed'&&<div className="mt-2 space-y-3 rounded-2xl rounded-tl-sm border border-sage bg-white p-4">
-                <div className="flex items-start justify-between gap-2"><div><div className="flex items-center gap-2"><span className="grid h-6 w-6 place-items-center rounded-lg bg-[#E7F4EC] text-[#27704A]"><Check size={14}/></span><h3 className="text-sm font-extrabold text-forest">Analysis complete.</h3></div><p className="mt-2 text-xs text-charcoal/65">{overruns.length} sites require attention. I’ve prepared individual drafts for each site lead. Nothing has been sent.</p></div><button onClick={reset} title="Replay review" className="shrink-0 rounded-lg border border-sage px-2.5 py-1.5 text-[10px] font-bold text-forest hover:bg-ivory">Replay</button></div>
-                <div className="rounded-xl bg-[#F5F7F3] p-3"><div className="flex items-center justify-between text-xs"><span className="font-bold text-forest">Quarter budget review</span><span className="text-charcoal/50">{overruns.length} of {rows.length} sites over</span></div><div className="mt-2 flex h-2 overflow-hidden rounded-full bg-sage">{rows.map(site=><span key={site.id} className={site.overrun?'bg-[#C8715C]':'bg-[#76B78E]'} style={{width:`${100/rows.length}%`}}/>)}</div><button onClick={() => setDetails(v=>!v)} className="mt-2 text-[10px] font-bold text-forest hover:underline">{details?'Hide site details':'View details'} <ChevronRight className={`inline h-3 w-3 transition-transform ${details?'rotate-90':''}`}/></button>{details&&<div className="mt-2 space-y-2 border-t border-sage pt-2">{overruns.map(site=><div key={site.id} className="flex justify-between gap-3 text-[10px]"><span className="font-semibold text-charcoal/75">{site.name} · {site.lead}</span><span className="text-[#A3402C]">+{money(site.overrunAmount)} ({(site.utilisation-100).toFixed(1)}%)</span></div>)}</div>}</div>
-                <div className="space-y-2">{overruns.filter(site=>!dismissed.includes(site.id)).map(site=><article key={site.id} className="rounded-xl border border-sage p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-extrabold text-forest">{site.name} <span className="font-medium text-charcoal/50">· {site.lead}</span></p><p className="mt-1 text-[10px] text-charcoal/55">Spent {money(site.spent)} of {money(site.budget)} · <span className="font-bold text-[#A3402C]">{(site.utilisation-100).toFixed(1)}% over</span></p></div>{sent.includes(site.id)&&<span className="inline-flex items-center gap-1 rounded-full bg-[#E7F4EC] px-2 py-1 text-[9px] font-bold text-[#27704A]"><Check size={10}/>Approved · simulated</span>}</div>
-                  {editId===site.id?<textarea aria-label={`Edit draft for ${site.name}`} value={drafts[site.id]||''} onChange={e=>setDrafts(d=>({...d,[site.id]:e.target.value}))} className="mt-3 min-h-28 w-full rounded-lg border border-sage p-3 text-xs leading-relaxed text-charcoal outline-none focus:border-forest"/>:<p className="mt-3 rounded-lg bg-[#F7F8F5] p-3 text-[11px] leading-relaxed text-charcoal/70">{drafts[site.id]||draftNote(site)}</p>}
+              {(stage==='thinking'||stage==='executing'||stage==='composing') && <div className="mt-2 rounded-2xl rounded-tl-sm border border-sage bg-white p-4"><div className="flex items-center justify-between gap-2"><div className="flex items-center gap-2 text-sm font-semibold text-forest"><span className="h-2 w-2 animate-pulse rounded-full bg-gold"/>Understanding · {mode}</div></div><p className="mt-1 text-xs text-charcoal/55">Request understood. No messages will be sent without your approval.</p>{plan&&<div className="mt-4 rounded-xl bg-[#F5F7F3] p-3"><p className="mb-2 text-[9px] font-bold uppercase tracking-[.14em] text-charcoal/45">Execution plan</p>{plan.plan.map((step,i)=><p key={step} className="py-1 text-[11px] text-charcoal/75">{i+1}. {step}</p>)}</div>}<div className="mt-4 space-y-2">{(agentResult?.tools || plan?.requiredTools.map(name=>({name,result:''})) || []).map((tool,i)=>{const done=Boolean(agentResult&&i<=toolIndex);const running=!agentResult&&i===toolIndex;return <div key={`${tool.name}-${i}`} className="flex items-start gap-2 rounded-xl bg-[#F7F8F5] px-3 py-2.5"><span className={`mt-0.5 grid h-5 w-5 place-items-center rounded-md ${done?'bg-[#E7F4EC] text-[#27704A]':running?'bg-[#FFF4D9] text-[#896813]':'bg-white text-charcoal/35'}`}>{done?<Check size={12}/>:running?<span className="h-2 w-2 animate-spin rounded-full border border-gold border-t-transparent"/>:<span className="h-1.5 w-1.5 rounded-full bg-current"/>}</span><span className="min-w-0 flex-1"><span className="block text-[10px] font-bold text-forest">{tool.name}()</span>{done&&<span className="text-[10px] text-charcoal/55">{agentResult?.tools[i]?.result}</span>}</span><span className="text-[9px] uppercase text-charcoal/40">{done?'Complete':running?'Running':'Pending'}</span></div>})}</div></div>}
+              {stage==='error'&&<div className="mt-2 rounded-2xl border border-[#F0D1C9] bg-white p-4"><p className="text-sm font-bold text-[#A3402C]">I couldn’t complete that review.</p><p className="mt-1 text-xs text-charcoal/55">The workspace data could not be loaded. Try again.</p><button onClick={()=>void run(query)} className="mt-3 rounded-lg bg-forest px-3 py-2 text-xs font-bold text-white">Retry</button></div>}
+              {stage==='completed'&&agentResult&&<div className="mt-2 space-y-3 rounded-2xl rounded-tl-sm border border-sage bg-white p-4">
+                <div className="flex items-start justify-between gap-2"><div><div className="flex items-center gap-2"><span className="grid h-6 w-6 place-items-center rounded-lg bg-[#E7F4EC] text-[#27704A]"><Check size={14}/></span><h3 className="text-sm font-extrabold text-forest">Analysis complete · {agentResult.mode}</h3></div><p className="mt-2 text-xs text-charcoal/65">{agentResult.answer}</p></div><button onClick={()=>void run(query)} title="Replay request" className="shrink-0 rounded-lg border border-sage px-2.5 py-1.5 text-[10px] font-bold text-forest hover:bg-ivory">Replay</button></div>
+                <details className="rounded-xl border border-sage bg-white p-3"><summary className="cursor-pointer text-[10px] font-bold text-forest">Execution details · {agentResult.tools.length} tools completed</summary><div className="mt-2 space-y-2">{agentResult.tools.map(tool=><div key={tool.name} className="flex gap-2 rounded-lg bg-[#F7F8F5] p-2"><Check size={12} className="shrink-0 text-[#27704A]"/><p className="text-[10px] text-charcoal/70"><b className="text-forest">{tool.name}()</b> — {tool.result}</p></div>)}</div></details>
+                {agentResult.sources.length>0&&<div className="rounded-xl bg-[#F5F7F3] p-3"><div className="flex items-center justify-between text-xs"><span className="font-bold text-forest">Source records</span><span className="text-charcoal/50">{agentResult.sources.length} verified</span></div><button onClick={() => setDetails(v=>!v)} className="mt-2 text-[10px] font-bold text-forest hover:underline">{details?'Hide records':'View records'} <ChevronRight className={`inline h-3 w-3 transition-transform ${details?'rotate-90':''}`}/></button>{details&&<div className="mt-2 space-y-2 border-t border-sage pt-2">{agentResult.sources.map(site=><button key={site.id} onClick={()=>{setHighlightedSite(site.id);nav('/workspace/sites');setCopilot(false);window.setTimeout(()=>document.getElementById(`site-${site.id}`)?.scrollIntoView({behavior:'smooth',block:'center'}),80)}} className="flex w-full justify-between gap-3 text-left text-[10px] hover:underline"><span className="font-semibold text-charcoal/75">{site.name} · {site.lead}</span><span className="text-forest">{money(site.spent)} · {site.utilisation.toFixed(1)}%</span></button>)}</div>}</div>}
+                <div className="space-y-2">{agentResult.drafts.filter(({site})=>!dismissed.includes(site.id)).map(({site,text})=><article key={site.id} className="rounded-xl border border-sage p-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs font-extrabold text-forest">To: {site.lead} · {site.name}</p><p className="mt-1 text-[10px] text-charcoal/55">Budget {money(site.budget)} · spent {money(site.spent)} · {site.utilisation.toFixed(1)}% utilisation</p></div>{sent.includes(site.id)&&<span className="inline-flex items-center gap-1 rounded-full bg-[#E7F4EC] px-2 py-1 text-[9px] font-bold text-[#27704A]"><Check size={10}/>Approved · simulated</span>}</div>
+                  {editId===site.id?<textarea aria-label={`Edit draft for ${site.name}`} value={drafts[site.id]||text} onChange={e=>setDrafts(d=>({...d,[site.id]:e.target.value}))} className="mt-3 min-h-28 w-full rounded-lg border border-sage p-3 text-xs leading-relaxed text-charcoal outline-none focus:border-forest"/>:<p className="mt-3 rounded-lg bg-[#F7F8F5] p-3 text-[11px] leading-relaxed text-charcoal/70">{drafts[site.id]||text}</p>}
                   <div className="mt-2 flex flex-wrap justify-end gap-2"><button onClick={()=>setDismissed(a=>[...a,site.id])} className="rounded-lg border border-sage px-3 py-2 text-[10px] font-bold text-charcoal/60 hover:bg-ivory">Dismiss</button>{editId===site.id?<button onClick={()=>setEditId(null)} className="rounded-lg border border-sage px-3 py-2 text-[10px] font-bold text-forest hover:bg-ivory">Save draft</button>:<button onClick={()=>setEditId(site.id)} className="rounded-lg border border-sage px-3 py-2 text-[10px] font-bold text-forest hover:bg-ivory">Edit draft</button>}<button disabled={sent.includes(site.id)} onClick={()=>setSent(a=>[...a,site.id])} className="rounded-lg bg-forest px-3 py-2 text-[10px] font-bold text-white hover:bg-[#1B5143] disabled:cursor-default disabled:bg-[#4D956C]">{sent.includes(site.id)?'Sent (simulated)':'Approve & send'}</button></div>
                 </article>)}</div><p className="rounded-lg bg-[#FFF8E8] px-3 py-2 text-[10px] leading-relaxed text-[#79632C]">Human review required. Each action simulates a send locally and never contacts anyone.</p></div>}
             </div></div>

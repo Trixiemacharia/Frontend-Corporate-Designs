@@ -1,32 +1,15 @@
-# React + TypeScript + Vite
+# Meridian
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Meridian is a React, TypeScript and Vite workspace. Its shared operational source of truth is `src/data/operations.ts`; the dashboard and copilot both calculate against those seeded site records.
 
-Currently, two official plugins are available:
+## Hybrid copilot
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The copilot shows a local intent plan immediately, then asks the optional server-side model endpoint to refine the intent and plan. Only validated intent/tool names are accepted. The browser executes allowlisted deterministic tools over the seeded records and provides the citations and draft values. If the provider is unavailable, times out, returns invalid JSON, or is rate limited, the deterministic classifier continues the workflow and the panel labels it **Offline fallback**. With a successful provider response it labels the workflow **AI assisted**.
 
-## React Compiler
+The current fallback handles over-budget sites, comparisons, highest utilisation, total overspend, good performance, explanations, drafting, draft follow-ups and out-of-scope requests. Drafts are editable; approval only simulates sending in the browser.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## LLM configuration
 
-## Expanding the Oxlint configuration
+Copy `.env.example` to `.env` and configure `LLM_API_KEY`; optionally set `LLM_PROVIDER`, `LLM_BASE_URL`, and `LLM_MODEL` for an OpenAI-compatible chat completions endpoint. The key is read only by `server.mjs` and is never included in the Vite client bundle. The server times out provider requests after nine seconds. Without a configured key, the copilot runs entirely offline.
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Run `npm run dev` for the Vite frontend and local API server. Run `npm run build` then `npm run serve` to serve the built application and API endpoint.
